@@ -200,6 +200,43 @@ def price(sym):
 nifty = price("NIFTY")
 bank = price("BANKNIFTY")
 
+# ---------- BREAKOUT DETECTION ----------
+def breakout(symbol):
+    try:
+        url = f"https://www.nseindia.com/api/quote-equity?symbol={symbol}"
+        r = session.get(url, headers=headers)
+        data = r.json()
+
+        high = data["priceInfo"]["intraDayHighLow"]["max"]
+        low = data["priceInfo"]["intraDayHighLow"]["min"]
+        last = data["priceInfo"]["lastPrice"]
+
+        if last >= high * 0.995:
+            return "bullish"
+        elif last <= low * 1.005:
+            return "bearish"
+        else:
+            return "none"
+
+    except:
+        return "none"
+
+
+# ---- NIFTY BREAKOUT ----
+b = breakout("NIFTY")
+
+if b == "bullish":
+    if is_new("nifty_breakout_up"):
+        send("🚀 NIFTY BREAKOUT ↑ → Possible CE Buy")
+        score += 2
+        signals.append("Breakout bullish")
+
+elif b == "bearish":
+    if is_new("nifty_breakout_down"):
+        send("🔻 NIFTY BREAKDOWN ↓ → Possible PE Buy")
+        score -= 2
+        signals.append("Breakout bearish")
+
 # ---------- TRADE ----------
 def trade(name, p, d):
     if not p: return None
