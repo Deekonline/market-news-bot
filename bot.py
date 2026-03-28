@@ -8,6 +8,7 @@ TOKEN = "8637154006:AAH5n2BM9y9T7AzHPXWhcywG0vuAcQ2mkMM"
 CHAT_ID = "2126714028"
 
 
+
 def send(msg):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
@@ -17,9 +18,9 @@ headers = {"User-Agent":"Mozilla/5.0","Accept":"application/json"}
 session = requests.Session()
 session.get("https://www.nseindia.com", headers=headers)
 
+# ---------- MEMORY ----------
 LAST_FILE = "last.json"
 
-# ---------- MEMORY ----------
 def load_last():
     if os.path.exists(LAST_FILE):
         with open(LAST_FILE,"r") as f:
@@ -40,53 +41,41 @@ def is_new(key):
 
 last = load_last()
 
-# ---------- TRENDLYNE SMART (IMPACT + COLLISION CONTROL) ----------
+score = 0
+signals = []
+
+# ---------- TRENDLYNE ----------
 try:
     url = "https://trendlyne.com/latest-news/"
     r = requests.get(url, headers=headers)
     html = r.text
 
-    import re
     matches = re.findall(r'<a[^>]*class=".*?title.*?"[^>]*>(.*?)</a>', html)
 
-    POSITIVE = [
-        "order","wins","contract","agreement","acquire","acquisition",
-        "stake buy","buy","investment","partnership","merger"
-    ]
+    POSITIVE = ["order","wins","contract","agreement","acquire","acquisition",
+                "stake buy","buy","investment","partnership","merger"]
 
-    NEGATIVE = [
-        "sell","stake sale","loss","decline","fraud","penalty",
-        "resign","default","downgrade"
-    ]
+    NEGATIVE = ["sell","stake sale","loss","decline","fraud","penalty",
+                "resign","default","downgrade"]
 
     for title in matches[:10]:
         clean = title.lower().strip()
-
-        # ---- detect stock name (basic)
-        words = clean.split()
-        stock = words[0].upper() if len(words) > 0 else "UNKNOWN"
+        stock = clean.split()[0].upper() if clean else "UNKNOWN"
 
         impact = "NEUTRAL"
-
         if any(k in clean for k in POSITIVE):
             impact = "BULLISH"
         elif any(k in clean for k in NEGATIVE):
             impact = "BEARISH"
 
-        # ---- collision control key
         key = f"{stock}_{impact}"
 
         if impact != "NEUTRAL" and is_new(key):
-
             emoji = "🟢" if impact == "BULLISH" else "🔴"
+            send(f"{emoji} TRENDLYNE ({impact})\n\nStock: {stock}\n\nNews:\n{title}")
 
-            send(f"""{emoji} TRENDLYNE ({impact})
-
-Stock: {stock}
-
-News:
-{title}
-""")
+            score += 2
+            signals.append(f"Trendlyne {impact}")
 
 except:
     pass
@@ -137,36 +126,14 @@ def fno(symbol):
     except:
         return "neutral"
 
-nifty_dir = fno("NIFTY")
+direction = fno("NIFTY")
 
-if nifty_dir == "bullish":
+if direction == "bullish":
     score += 3
     signals.append("F&O bullish")
-elif nifty_dir == "bearish":
+elif direction == "bearish":
     score -= 3
     signals.append("F&O bearish")
-
-# ---------- VOLUME ----------
-try:
-    r = session.get("https://www.nseindia.com/api/live-analysis-volume?index=all", headers=headers)
-    data = r.json()
-
-    for stock in data["data"][:5]:
-        if float(stock["totalTradedVolume"]) > 5000000:
-            if is_new(stock["symbol"] + "_vol"):
-                score += 2
-                signals.append("Volume spike")
-            break
-except:
-    pass
-
-# ---------- DECISION ----------
-decision = "NEUTRAL"
-
-if score >= 4:
-    decision = "BULLISH"
-elif score <= -4:
-    decision = "BEARISH"
 
 # ---------- PRICE ----------
 def get_price(symbol):
@@ -177,37 +144,63 @@ def get_price(symbol):
     except:
         return None
 
-price = get_price("NIFTY")
+nifty_price = get_price("NIFTY")
+bank_price = get_price("BANKNIFTY")
 
-# ---------- TRADE ----------
-if decision != "NEUTRAL" and price:
+# ---------- TRADE LOGIC ----------
+def trade_logic(name, price, direction):
+    if not price or direction == "neutral":
+        return None
 
-    entry = price
-    sl = entry * 0.995 if decision == "BULLISH" else entry * 1.005
-    target = entry * 1.01 if decision == "BULLISH" else entry * 0.99
+    strike = round(price / 50) * 50 if name == "NIFTY" else round(price / 100) * 100
 
-    strike = round(price / 50) * 50
-    option = f"{strike} CE" if decision == "BULLISH" else f"{strike} PE"
+    if direction == "bullish":
+        option = f"{strike} CE"
+        sl = price * 0.995
+        target = price * 1.01
+    else:
+        option = f"{strike} PE"
+        sl = price * 1.005
+        target = price * 0.99
 
-    confidence = min(abs(score) * 15, 95)
+    return f"""
+📊 {name} TRADE IDEA
 
-    key = decision + str(strike)
+Bias: {direction.upper()}
 
-    if is_new(key):
-        send(f"""
-🚨 TRADE SIGNAL
-
-Bias: {decision}
-Confidence: {confidence}%
-
-Entry: {round(entry,2)}
+Entry: {round(price,2)}
 SL: {round(sl,2)}
 Target: {round(target,2)}
 
 Option: Buy {option}
+"""
+
+# ---------- HIGH CONVICTION SIGNAL ----------
+if score >= 4:
+    msg = trade_logic("NIFTY", nifty_price, direction)
+    if msg and is_new("nifty_trade"):
+        send(msg)
+
+    bank_dir = fno("BANKNIFTY")
+    msg2 = trade_logic("BANKNIFTY", bank_price, bank_dir)
+    if msg2 and is_new("bank_trade"):
+        send(msg2)
+
+# ---------- ALWAYS SEND UPDATE ----------
+decision = "NEUTRAL"
+if score >= 4:
+    decision = "BULLISH"
+elif score <= -4:
+    decision = "BEARISH"
+
+send(f"""
+⏱️ MARKET UPDATE
+
+Score: {score}
+Bias: {decision}
 
 Signals:
-- {' | '.join(signals)}
+- {' | '.join(signals) if signals else 'No major signals'}
 """)
 
 save_last(last)
