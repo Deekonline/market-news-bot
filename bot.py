@@ -42,30 +42,31 @@ last = load_last()
 score = 0
 signals = []
 
-# ---------- LIVE PRICE ----------
-def get_price(symbol):
-    try:
-        url = f"https://www.nseindia.com/api/quote-derivative?symbol={symbol}"
-        r = session.get(url, headers=headers)
-        data = r.json()
-        return data["underlyingValue"]
-    except:
-        return None
+# ---------- TRENDLYNE (ALWAYS SEND) ----------
+try:
+    r = requests.get("https://trendlyne.com/api/market-news/", headers=headers)
+    data = r.json()
 
-nifty_price = get_price("NIFTY")
+    for item in data["results"][:2]:  # get top 2 news
+        title = item["title"]
 
-# ---------- NSE NEWS ----------
+        if is_new("trend_" + title):
+            send(f"🟠 TRENDLYNE\n{title}")
+
+except:
+    send("⚠️ Trendlyne fetch issue")
+
+# ---------- NSE ----------
 try:
     r = session.get("https://www.nseindia.com/api/corporate-announcements?index=equities", headers=headers)
     data = r.json()
     item = data["data"][0]
 
-    key = item["headline"]
-
-    if is_new(key):
+    if is_new(item["headline"]):
         send(f"🟢 NSE\n{item['symbol']}\n{item['headline']}")
         score += 2
         signals.append("NSE news")
+
 except:
     pass
 
@@ -75,25 +76,11 @@ try:
     data = r.json()
     item = data["Table"][0]
 
-    key = item["HEADLINE"]
-
-    if is_new(key):
+    if is_new(item["HEADLINE"]):
         send(f"🔵 BSE\n{item['SCRIPNAME']}\n{item['HEADLINE']}")
         score += 2
         signals.append("BSE news")
-except:
-    pass
 
-# ---------- TRENDLYNE ----------
-try:
-    r = requests.get("https://trendlyne.com/api/market-news/", headers=headers)
-    data = r.json()
-    title = data["results"][0]["title"]
-
-    if is_new(title):
-        send(f"🟠 TRENDLYNE\n{title}")
-        score += 2
-        signals.append("Trendlyne")
 except:
     pass
 
@@ -131,9 +118,7 @@ try:
 
     for stock in data["data"][:5]:
         if float(stock["totalTradedVolume"]) > 5000000:
-            key = stock["symbol"] + "_vol"
-
-            if is_new(key):
+            if is_new(stock["symbol"] + "_vol"):
                 score += 2
                 signals.append("Volume spike")
             break
@@ -143,22 +128,30 @@ except:
 # ---------- DECISION ----------
 decision = "NEUTRAL"
 
-if score >= 6:
+if score >= 4:
     decision = "BULLISH"
-elif score <= -6:
+elif score <= -4:
     decision = "BEARISH"
 
+# ---------- PRICE ----------
+def get_price(symbol):
+    try:
+        url = f"https://www.nseindia.com/api/quote-derivative?symbol={symbol}"
+        r = session.get(url, headers=headers)
+        return r.json()["underlyingValue"]
+    except:
+        return None
+
+price = get_price("NIFTY")
+
 # ---------- TRADE ----------
-def round_strike(price, step):
-    return int(round(price / step) * step)
+if decision != "NEUTRAL" and price:
 
-if decision != "NEUTRAL" and nifty_price:
-
-    entry = nifty_price
+    entry = price
     sl = entry * 0.995 if decision == "BULLISH" else entry * 1.005
     target = entry * 1.01 if decision == "BULLISH" else entry * 0.99
 
-    strike = round_strike(nifty_price, 50)
+    strike = round(price / 50) * 50
     option = f"{strike} CE" if decision == "BULLISH" else f"{strike} PE"
 
     confidence = min(abs(score) * 15, 95)
@@ -167,7 +160,7 @@ if decision != "NEUTRAL" and nifty_price:
 
     if is_new(key):
         send(f"""
-🚨 HIGH CONVICTION TRADE
+🚨 TRADE SIGNAL
 
 Bias: {decision}
 Confidence: {confidence}%
