@@ -1,4 +1,3 @@
-
 import requests
 
 TOKEN = "YOUR_TOKEN"
@@ -10,24 +9,42 @@ def send(msg):
 
 headers = {
     "User-Agent": "Mozilla/5.0",
-    "Accept": "application/json",
-    "Referer": "https://www.bseindia.com/"
+    "Accept": "application/json"
 }
 
-url = "https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w?strCat=-1&strPrevDate=&strScrip=&strSearch=P&strToDate=&strType=C"
-
-r = requests.get(url, headers=headers)
-
-print(r.text)
-
+# ---------- BSE ----------
 try:
-    data = r.json()
+    bse_url = "https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w?strCat=-1&strPrevDate=&strScrip=&strSearch=P&strToDate=&strType=C"
+    r = requests.get(bse_url, headers=headers)
 
-    for item in data["Table"][:5]:
-        title = item["HEADLINE"]
-        company = item["SCRIPNAME"]
+    if "Table" in r.text:
+        data = r.json()
 
-        send(f"🚨 {company}\n{title}")
+        for item in data["Table"][:3]:
+            company = item["SCRIPNAME"]
+            title = item["HEADLINE"]
 
-except Exception as e:
-    send("Bot running but no data yet")
+            send(f"🔵 BSE\n{company}\n{title}")
+
+except:
+    send("BSE running")
+
+# ---------- NSE ----------
+try:
+    nse_url = "https://www.nseindia.com/api/corporate-announcements?index=equities"
+    session = requests.Session()
+
+    session.get("https://www.nseindia.com", headers=headers)
+    r = session.get(nse_url, headers=headers)
+
+    if "data" in r.text:
+        data = r.json()
+
+        for item in data["data"][:3]:
+            company = item["symbol"]
+            title = item["headline"]
+
+            send(f"🟢 NSE\n{company}\n{title}")
+
+except:
+    send("NSE running")
