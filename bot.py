@@ -8,7 +8,6 @@ TOKEN = "8637154006:AAH5n2BM9y9T7AzHPXWhcywG0vuAcQ2mkMM"
 CHAT_ID = "2126714028"
 
 
-
 def send(msg):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
@@ -41,88 +40,145 @@ def is_new(key):
 
 last = load_last()
 
+# ---------- GLOBAL ----------
 score = 0
 signals = []
+found_news = False
+
+POSITIVE = ["order","wins","contract","agreement","acquire","acquisition",
+            "stake","buy","investment","merger"]
+
+NEGATIVE = ["sell","loss","decline","fraud","penalty",
+            "resign","default","downgrade"]
+
+# ---------- PROCESS NEWS ----------
+def process_news(title):
+    global score, signals, found_news
+
+    clean = title.lower().strip()
+    if len(clean) < 20:
+        return
+
+    stock = clean.split()[0].upper()
+
+    impact = "NEUTRAL"
+    if any(k in clean for k in POSITIVE):
+        impact = "BULLISH"
+    elif any(k in clean for k in NEGATIVE):
+        impact = "BEARISH"
+
+    key = f"{stock}_{impact}"
+
+    if impact != "NEUTRAL" and is_new(key):
+        emoji = "🟢" if impact == "BULLISH" else "🔴"
+
+        send(f"""{emoji} NEWS ({impact})
+
+Stock: {stock}
+
+News:
+{title}
+""")
+
+        score += 2
+        signals.append(f"News {impact}")
+        found_news = True
 
 # ---------- TRENDLYNE ----------
 try:
-    url = "https://trendlyne.com/latest-news/"
-    r = requests.get(url, headers=headers)
+    r = requests.get("https://trendlyne.com/latest-news/", headers=headers)
     html = r.text
+    matches = re.findall(r'>([^<>]{20,120})</a>', html)
 
-    matches = re.findall(r'<a[^>]*class=".*?title.*?"[^>]*>(.*?)</a>', html)
-
-    POSITIVE = ["order","wins","contract","agreement","acquire","acquisition",
-                "stake buy","buy","investment","partnership","merger"]
-
-    NEGATIVE = ["sell","stake sale","loss","decline","fraud","penalty",
-                "resign","default","downgrade"]
-
-    for title in matches[:10]:
-        clean = title.lower().strip()
-        stock = clean.split()[0].upper() if clean else "UNKNOWN"
-
-        impact = "NEUTRAL"
-        if any(k in clean for k in POSITIVE):
-            impact = "BULLISH"
-        elif any(k in clean for k in NEGATIVE):
-            impact = "BEARISH"
-
-        key = f"{stock}_{impact}"
-
-        if impact != "NEUTRAL" and is_new(key):
-            emoji = "🟢" if impact == "BULLISH" else "🔴"
-            send(f"{emoji} TRENDLYNE ({impact})\n\nStock: {stock}\n\nNews:\n{title}")
-
-            score += 2
-            signals.append(f"Trendlyne {impact}")
-
+    for title in matches[:20]:
+        process_news(title)
 except:
     pass
+
+# ---------- MONEYCONTROL ----------
+try:
+    r = requests.get("https://www.moneycontrol.com/news/business/stocks/", headers=headers)
+    html = r.text
+    matches = re.findall(r'<h2.*?>(.*?)</h2>', html)
+
+    for title in matches[:10]:
+        process_news(title)
+except:
+    pass
+
+# ---------- ECONOMIC TIMES ----------
+try:
+    r = requests.get("https://economictimes.indiatimes.com/markets/stocks/news", headers=headers)
+    html = r.text
+    matches = re.findall(r'<a[^>]*>([^<>]{20,120})</a>', html)
+
+    for title in matches[:15]:
+        process_news(title)
+except:
+    pass
+
+# ---------- NO NEWS ----------
+if not found_news:
+    send("ℹ️ No high-impact news from sources")
 
 # ---------- NSE ----------
 try:
     r = session.get("https://www.nseindia.com/api/corporate-announcements?index=equities", headers=headers)
-    data = r.json()
-    item = data["data"][0]
+    item = r.json()["data"][0]
 
     if is_new(item["headline"]):
         send(f"🟢 NSE\n{item['symbol']}\n{item['headline']}")
         score += 2
-        signals.append("NSE news")
-
+        signals.append("NSE")
 except:
     pass
 
 # ---------- BSE ----------
 try:
     r = requests.get("https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w?strCat=-1", headers=headers)
-    data = r.json()
-    item = data["Table"][0]
+    item = r.json()["Table"][0]
 
     if is_new(item["HEADLINE"]):
         send(f"🔵 BSE\n{item['SCRIPNAME']}\n{item['HEADLINE']}")
         score += 2
-        signals.append("BSE news")
-
+        signals.append("BSE")
 except:
     pass
+
+# ---------- MARKET MOVERS ----------
+try:
+    r = session.get("https://www.nseindia.com/api/live-analysis-variations?index=gainers", headers=headers)
+    for s in r.json()["data"][:5]:
+        if float(s["pChange"]) > 2 and is_new(s["symbol"]+"_g"):
+            send(f"🟢 GAINER {s['symbol']} ↑ {s['pChange']}%")
+            score += 2
+            signals.append("Gainers")
+            break
+except: pass
+
+try:
+    r = session.get("https://www.nseindia.com/api/live-analysis-variations?index=losers", headers=headers)
+    for s in r.json()["data"][:5]:
+        if float(s["pChange"]) < -2 and is_new(s["symbol"]+"_l"):
+            send(f"🔴 LOSER {s['symbol']} ↓ {s['pChange']}%")
+            score -= 2
+            signals.append("Losers")
+            break
+except: pass
 
 # ---------- F&O ----------
 def fno(symbol):
     try:
-        url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
-        r = session.get(url, headers=headers)
+        r = session.get(f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}", headers=headers)
         data = r.json()
 
-        ce_max = pe_max = 0
-
+        ce = pe = 0
         for i in data["records"]["data"]:
             if "CE" in i and "PE" in i:
-                ce_max = max(ce_max, i["CE"]["openInterest"])
-                pe_max = max(pe_max, i["PE"]["openInterest"])
+                ce = max(ce, i["CE"]["openInterest"])
+                pe = max(pe, i["PE"]["openInterest"])
 
-        return "bullish" if pe_max > ce_max else "bearish"
+        return "bullish" if pe > ce else "bearish"
     except:
         return "neutral"
 
@@ -130,77 +186,36 @@ direction = fno("NIFTY")
 
 if direction == "bullish":
     score += 3
-    signals.append("F&O bullish")
 elif direction == "bearish":
     score -= 3
-    signals.append("F&O bearish")
 
 # ---------- PRICE ----------
-def get_price(symbol):
+def price(sym):
     try:
-        url = f"https://www.nseindia.com/api/quote-derivative?symbol={symbol}"
-        r = session.get(url, headers=headers)
+        r = session.get(f"https://www.nseindia.com/api/quote-derivative?symbol={sym}", headers=headers)
         return r.json()["underlyingValue"]
     except:
         return None
 
-nifty_price = get_price("NIFTY")
-bank_price = get_price("BANKNIFTY")
+nifty = price("NIFTY")
+bank = price("BANKNIFTY")
 
-# ---------- TRADE LOGIC ----------
-def trade_logic(name, price, direction):
-    if not price or direction == "neutral":
-        return None
+# ---------- TRADE ----------
+def trade(name, p, d):
+    if not p: return None
+    strike = round(p/50)*50 if name=="NIFTY" else round(p/100)*100
+    opt = f"{strike} CE" if d=="bullish" else f"{strike} PE"
+    return f"{name} → {opt} | Entry:{round(p,2)} SL:{round(p*0.995,2)} Target:{round(p*1.01,2)}"
 
-    strike = round(price / 50) * 50 if name == "NIFTY" else round(price / 100) * 100
-
-    if direction == "bullish":
-        option = f"{strike} CE"
-        sl = price * 0.995
-        target = price * 1.01
-    else:
-        option = f"{strike} PE"
-        sl = price * 1.005
-        target = price * 0.99
-
-    return f"""
-📊 {name} TRADE IDEA
-
-Bias: {direction.upper()}
-
-Entry: {round(price,2)}
-SL: {round(sl,2)}
-Target: {round(target,2)}
-
-Option: Buy {option}
-"""
-
-# ---------- HIGH CONVICTION SIGNAL ----------
 if score >= 4:
-    msg = trade_logic("NIFTY", nifty_price, direction)
-    if msg and is_new("nifty_trade"):
-        send(msg)
+    t = trade("NIFTY", nifty, direction)
+    if t and is_new("nifty"): send("📊 "+t)
 
-    bank_dir = fno("BANKNIFTY")
-    msg2 = trade_logic("BANKNIFTY", bank_price, bank_dir)
-    if msg2 and is_new("bank_trade"):
-        send(msg2)
+# ---------- UPDATE ----------
+bias = "NEUTRAL"
+if score >= 4: bias="BULLISH"
+elif score <= -4: bias="BEARISH"
 
-# ---------- ALWAYS SEND UPDATE ----------
-decision = "NEUTRAL"
-if score >= 4:
-    decision = "BULLISH"
-elif score <= -4:
-    decision = "BEARISH"
-
-send(f"""
-⏱️ MARKET UPDATE
-
-Score: {score}
-Bias: {decision}
-
-Signals:
-- {' | '.join(signals) if signals else 'No major signals'}
-""")
+send(f"⏱️ UPDATE\nScore:{score}\nBias:{bias}\nSignals:{signals}")
 
 save_last(last)
