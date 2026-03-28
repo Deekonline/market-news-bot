@@ -2,7 +2,8 @@
 import requests
 import json
 import os
-
+import datetime
+send(f"⏱️ BOT RUN: {datetime.datetime.now()}")
 
 TOKEN = "8637154006:AAH5n2BM9y9T7AzHPXWhcywG0vuAcQ2mkMM"
 CHAT_ID = "2126714028"
