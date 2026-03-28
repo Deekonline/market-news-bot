@@ -1,3 +1,4 @@
+
 import requests
 import json
 import os
@@ -39,22 +40,56 @@ def is_new(key):
 
 last = load_last()
 
-score = 0
-signals = []
-
-# ---------- TRENDLYNE (ALWAYS SEND) ----------
+# ---------- TRENDLYNE SMART (IMPACT + COLLISION CONTROL) ----------
 try:
-    r = requests.get("https://trendlyne.com/api/market-news/", headers=headers)
-    data = r.json()
+    url = "https://trendlyne.com/latest-news/"
+    r = requests.get(url, headers=headers)
+    html = r.text
 
-    for item in data["results"][:2]:  # get top 2 news
-        title = item["title"]
+    import re
+    matches = re.findall(r'<a[^>]*class=".*?title.*?"[^>]*>(.*?)</a>', html)
 
-        if is_new("trend_" + title):
-            send(f"🟠 TRENDLYNE\n{title}")
+    POSITIVE = [
+        "order","wins","contract","agreement","acquire","acquisition",
+        "stake buy","buy","investment","partnership","merger"
+    ]
+
+    NEGATIVE = [
+        "sell","stake sale","loss","decline","fraud","penalty",
+        "resign","default","downgrade"
+    ]
+
+    for title in matches[:10]:
+        clean = title.lower().strip()
+
+        # ---- detect stock name (basic)
+        words = clean.split()
+        stock = words[0].upper() if len(words) > 0 else "UNKNOWN"
+
+        impact = "NEUTRAL"
+
+        if any(k in clean for k in POSITIVE):
+            impact = "BULLISH"
+        elif any(k in clean for k in NEGATIVE):
+            impact = "BEARISH"
+
+        # ---- collision control key
+        key = f"{stock}_{impact}"
+
+        if impact != "NEUTRAL" and is_new(key):
+
+            emoji = "🟢" if impact == "BULLISH" else "🔴"
+
+            send(f"""{emoji} TRENDLYNE ({impact})
+
+Stock: {stock}
+
+News:
+{title}
+""")
 
 except:
-    send("⚠️ Trendlyne fetch issue")
+    pass
 
 # ---------- NSE ----------
 try:
