@@ -2,8 +2,9 @@
 import requests
 import json
 import os
+import re
 import datetime
-send(f"⏱️ BOT RUN: {datetime.datetime.now()}")
+
 
 TOKEN = "8637154006:AAH5n2BM9y9T7AzHPXWhcywG0vuAcQ2mkMM"
 CHAT_ID = "2126714028"
@@ -12,6 +13,8 @@ CHAT_ID = "2126714028"
 def send(msg):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+    
+send(f"⏱️ BOT RUN: {datetime.datetime.now()}")
 
 headers = {"User-Agent":"Mozilla/5.0","Accept":"application/json"}
 
