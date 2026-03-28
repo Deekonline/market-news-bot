@@ -1,10 +1,11 @@
-import request
+import requests
 import json
 import os
 
 
 TOKEN = "8637154006:AAH5n2BM9y9T7AzHPXWhcywG0vuAcQ2mkMM"
 CHAT_ID = "2126714028"
+
 
 def send(msg):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -15,22 +16,31 @@ headers = {"User-Agent":"Mozilla/5.0","Accept":"application/json"}
 session = requests.Session()
 session.get("https://www.nseindia.com", headers=headers)
 
-score = 0
-signals = []
-
 LAST_FILE = "last.json"
 
+# ---------- MEMORY ----------
 def load_last():
     if os.path.exists(LAST_FILE):
         with open(LAST_FILE,"r") as f:
             return json.load(f)
-    return {}
+    return {"history": []}
 
 def save_last(data):
     with open(LAST_FILE,"w") as f:
         json.dump(data,f)
 
+def is_new(key):
+    if key in last["history"]:
+        return False
+    last["history"].append(key)
+    if len(last["history"]) > 100:
+        last["history"].pop(0)
+    return True
+
 last = load_last()
+
+score = 0
+signals = []
 
 # ---------- LIVE PRICE ----------
 def get_price(symbol):
@@ -43,7 +53,6 @@ def get_price(symbol):
         return None
 
 nifty_price = get_price("NIFTY")
-bank_price = get_price("BANKNIFTY")
 
 # ---------- NSE NEWS ----------
 try:
@@ -51,12 +60,14 @@ try:
     data = r.json()
     item = data["data"][0]
 
-    if last.get("nse") != item["headline"]:
+    key = item["headline"]
+
+    if is_new(key):
         send(f"🟢 NSE\n{item['symbol']}\n{item['headline']}")
-        last["nse"] = item["headline"]
         score += 2
         signals.append("NSE news")
-except: pass
+except:
+    pass
 
 # ---------- BSE ----------
 try:
@@ -64,12 +75,14 @@ try:
     data = r.json()
     item = data["Table"][0]
 
-    if last.get("bse") != item["HEADLINE"]:
+    key = item["HEADLINE"]
+
+    if is_new(key):
         send(f"🔵 BSE\n{item['SCRIPNAME']}\n{item['HEADLINE']}")
-        last["bse"] = item["HEADLINE"]
         score += 2
         signals.append("BSE news")
-except: pass
+except:
+    pass
 
 # ---------- TRENDLYNE ----------
 try:
@@ -77,12 +90,12 @@ try:
     data = r.json()
     title = data["results"][0]["title"]
 
-    if last.get("trend") != title:
+    if is_new(title):
         send(f"🟠 TRENDLYNE\n{title}")
-        last["trend"] = title
         score += 2
         signals.append("Trendlyne")
-except: pass
+except:
+    pass
 
 # ---------- F&O ----------
 def fno(symbol):
@@ -103,21 +116,13 @@ def fno(symbol):
         return "neutral"
 
 nifty_dir = fno("NIFTY")
-bank_dir = fno("BANKNIFTY")
 
 if nifty_dir == "bullish":
     score += 3
-    signals.append("Nifty bullish")
+    signals.append("F&O bullish")
 elif nifty_dir == "bearish":
     score -= 3
-    signals.append("Nifty bearish")
-
-if bank_dir == "bullish":
-    score += 2
-    signals.append("BankNifty bullish")
-elif bank_dir == "bearish":
-    score -= 2
-    signals.append("BankNifty bearish")
+    signals.append("F&O bearish")
 
 # ---------- VOLUME ----------
 try:
@@ -126,10 +131,14 @@ try:
 
     for stock in data["data"][:5]:
         if float(stock["totalTradedVolume"]) > 5000000:
-            score += 2
-            signals.append("Volume spike")
+            key = stock["symbol"] + "_vol"
+
+            if is_new(key):
+                score += 2
+                signals.append("Volume spike")
             break
-except: pass
+except:
+    pass
 
 # ---------- DECISION ----------
 decision = "NEUTRAL"
@@ -139,7 +148,7 @@ if score >= 6:
 elif score <= -6:
     decision = "BEARISH"
 
-# ---------- ENTRY LOGIC ----------
+# ---------- TRADE ----------
 def round_strike(price, step):
     return int(round(price / step) * step)
 
@@ -150,16 +159,16 @@ if decision != "NEUTRAL" and nifty_price:
     target = entry * 1.01 if decision == "BULLISH" else entry * 0.99
 
     strike = round_strike(nifty_price, 50)
-
     option = f"{strike} CE" if decision == "BULLISH" else f"{strike} PE"
 
     confidence = min(abs(score) * 15, 95)
 
-    if last.get("final") != decision:
-        send(f"""
-🚨 ULTIMATE TRADE
+    key = decision + str(strike)
 
-Index: NIFTY
+    if is_new(key):
+        send(f"""
+🚨 HIGH CONVICTION TRADE
+
 Bias: {decision}
 Confidence: {confidence}%
 
@@ -172,6 +181,5 @@ Option: Buy {option}
 Signals:
 - {' | '.join(signals)}
 """)
-        last["final"] = decision
 
 save_last(last)
